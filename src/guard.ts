@@ -13,6 +13,11 @@ const PRICE_SLACK = 1.05;
 
 export class PolicyError extends Error {}
 
+// Rentals for one owner run one at a time, so parallel calls can't each pass the
+// budget check before any of them records its spend. This holds within one process;
+// a hosted deployment running several needs its Store to serialize rentals too.
+const ownerQueues = new Map<string, Promise<unknown>>();
+
 export interface ManagedLabel {
   name: string;
   expiresAt: number; // unix seconds
@@ -31,15 +36,16 @@ export function parseLabel(label: string | null | undefined): ManagedLabel | und
 // Runs on the instance itself, so the time limit holds even after the user
 // closes their assistant and this server stops. Vast injects CONTAINER_ID and
 // a per-instance CONTAINER_API_KEY that is allowed to destroy its own instance.
+// The timer counts down to a fixed time (`expiresAt`, unix seconds), so if Vast
+// reruns this when a stopped box starts again, the restart can't extend it.
 export function buildOnstart(opts: {
-  hours: number;
+  expiresAt: number;
   command?: string;
   destroyOnExit: boolean;
   apiUrl: string;
   // Destroy after this many minutes with every GPU under IDLE_UTIL_PERCENT. 0 or unset turns it off.
   idleMinutes?: number;
 }): string {
-  const ttlSeconds = Math.round(opts.hours * 3600);
   const lines = [
     "cat > /tmp/vast-mcp-destroy.sh <<'VASTMCP'",
     "#!/bin/sh",
@@ -56,7 +62,7 @@ export function buildOnstart(opts: {
     "chmod +x /tmp/vast-mcp-destroy.sh",
     // Without either tool the timer cannot call the API; say so where instance_logs can see it.
     'command -v curl >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || echo "vast-mcp: WARNING: image has neither curl nor python3, so the self-destroy timer cannot run. Destroy this instance yourself." >/proc/1/fd/1',
-    `nohup sh -c 'sleep ${ttlSeconds}; echo "vast-mcp: time limit reached, destroying"; /tmp/vast-mcp-destroy.sh' >/tmp/vast-mcp-ttl.log 2>&1 &`,
+    `nohup sh -c 'left=$((${opts.expiresAt} - $(date +%s))); [ "$left" -gt 0 ] && sleep "$left"; echo "vast-mcp: time limit reached, destroying"; /tmp/vast-mcp-destroy.sh' >/tmp/vast-mcp-ttl.log 2>&1 &`,
   ];
   if (opts.idleMinutes && opts.idleMinutes > 0) {
     // Checks once a minute; the busiest GPU decides, so one working GPU keeps a multi-GPU box alive.
@@ -79,11 +85,13 @@ export function buildOnstart(opts: {
     );
   }
   if (opts.command) {
+    // A fresh delimiter, so no line of the command can end the heredoc early.
+    const eof = `VASTMCPJOB_${crypto.randomUUID().replace(/-/g, "")}`;
     const after = opts.destroyOnExit ? '; echo "vast-mcp: job finished, destroying"; /tmp/vast-mcp-destroy.sh' : "";
     lines.push(
-      "cat > /tmp/vast-mcp-job.sh <<'VASTMCPJOB'",
+      `cat > /tmp/vast-mcp-job.sh <<'${eof}'`,
       opts.command,
-      "VASTMCPJOB",
+      eof,
       `nohup sh -c 'bash /tmp/vast-mcp-job.sh; echo "vast-mcp: job exited with code $?"${after}' >/tmp/vast-mcp-job.log 2>&1 &`,
       // Mirror job output to the container log so `instance_logs` can read it without SSH.
       "nohup tail -F /tmp/vast-mcp-job.log >/proc/1/fd/1 2>/dev/null &",
@@ -142,6 +150,16 @@ export class Guard {
     this.store = opts.store ?? new MemoryStore(this.now);
     this.owner = opts.owner ?? "local";
     this.createdAt = this.now();
+  }
+
+  async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const next = (ownerQueues.get(this.owner) ?? Promise.resolve()).catch(() => {}).then(fn);
+    ownerQueues.set(this.owner, next);
+    try {
+      return await next;
+    } finally {
+      if (ownerQueues.get(this.owner) === next) ownerQueues.delete(this.owner);
+    }
   }
 
   private spendWindowStart(): number {

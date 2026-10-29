@@ -212,7 +212,7 @@ export function createServer(deps: ServerDeps): McpServer {
       annotations: { destructiveHint: false, openWorldHint: true },
     },
     async (args) =>
-      run(async () => {
+      run(() => guard.exclusive(async () => {
         const { quote, offer } = await guard.redeem(args.quote_id);
         const expiresAt = nowSec() + Math.round(quote.hours * 3600);
         const label = makeLabel(quote.name, expiresAt);
@@ -223,7 +223,7 @@ export function createServer(deps: ServerDeps): McpServer {
             label,
             env: quote.env,
             onstart: buildOnstart({
-              hours: quote.hours,
+              expiresAt,
               command: quote.command,
               destroyOnExit: quote.destroyOnExit,
               idleMinutes: quote.idleMinutes,
@@ -246,7 +246,7 @@ export function createServer(deps: ServerDeps): McpServer {
           session_spend_committed_usd: Number((await guard.committedSpend()).toFixed(2)),
           next_step: "It takes a few minutes to start. Check with get_instance, read output with instance_logs, and destroy_instance when done.",
         };
-      })(),
+      }))(),
   );
 
   server.registerTool(
@@ -337,19 +337,19 @@ export function createServer(deps: ServerDeps): McpServer {
       inputSchema: { instance_id: z.number().int() },
     },
     async (args) =>
-      run(async () => {
+      run(() => guard.exclusive(async () => {
         guard.assertWritable();
         const inst = await findInstance(args.instance_id);
         const managed = guard.assertManaged(inst);
         const hoursLeft = Math.max(0, (managed.expiresAt - nowSec()) / 3600);
         if (hoursLeft <= 0) throw new PolicyError(`Instance ${inst.id} is past its time limit. Destroy it and rent a new one.`);
         if (isActive(inst)) return { instance_id: inst.id, status: inst.actual_status, note: "Already running." };
-        await guard.checkBudget(inst.dph_total ?? 0, Math.min(hoursLeft, guard.limits.maxHours), { newInstance: true });
+        // Hours 0: the rental's full time was already counted as spend when it was rented.
+        await guard.checkBudget(inst.dph_total ?? 0, 0, { newInstance: true });
         await client.setState(args.instance_id, "running");
-        await guard.recordRental(inst.dph_total ?? 0, hoursLeft);
         audit("start", { instance_id: args.instance_id });
         return { instance_id: args.instance_id, status: "starting" };
-      })(),
+      }))(),
   );
 
   server.registerTool(

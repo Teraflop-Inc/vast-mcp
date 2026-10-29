@@ -53,7 +53,7 @@ If you already ran `vastai set api-key`, you can leave out `VAST_API_KEY`.
 Vast API keys have no spend limits, so this server enforces them:
 
 - **Price check before every rental.** Renting is two steps: `quote_rental` shows the cost, and `rent_gpu` only works with a quote. The quote expires after 10 minutes and fails if the price rises more than 5%.
-- **Every rental has a time limit and destroys itself.** A timer runs on the GPU box itself, so it still fires if you close your assistant. As a backup, the server also destroys any of its boxes that are more than 10 minutes past their limit.
+- **Every rental has a time limit and destroys itself.** A timer runs on the GPU box itself, so it still fires if you close your assistant, and stopping and restarting the box doesn't extend it. By default the box also destroys itself after 30 minutes with the GPU idle (`idle_minutes` on `quote_rental`). The timers need `curl` or `python3` on the image, and the idle check needs `nvidia-smi`; if they're missing, the box says so in its log. As a backup, the server destroys any of its boxes that are more than 10 minutes past their limit the next time it's used.
 - **Spend caps**, all set by environment variable:
 
 | Variable | Default | Meaning |
@@ -94,12 +94,12 @@ const handler = createHttpHandler({
 // handler: (Request) => Promise<Response>
 ```
 
-- **Storage:** quotes and spend live in the `Store` you pass. `MemoryStore` works for one process. With several instances, or on serverless, implement `Store` (four methods) on Redis, Durable Objects or KV.
+- **Storage:** quotes and spend live in the `Store` you pass. `MemoryStore` works for one process. With several instances, or on serverless, implement `Store` (four methods) on Redis, Durable Objects or KV. Rentals for one user are serialized within a process; across processes, the store has to do it.
 - **Cloudflare Workers:** pass `jsonSchemaValidator: new CfWorkerJsonSchemaValidator()` from `@modelcontextprotocol/sdk/validation/cfworker`. Workers block the default validator.
 - **Sign in with Vast:** the handler sends the bearer token straight to the Vast API. Once Vast issues OAuth tokens that its API accepts, they work here unchanged. What's still needed is the OAuth metadata endpoint that points clients at Vast's sign-in.
-- **Rate limits:** Vast allows only about 6-8 requests at once, shared across keys (measured with two keys from one account and one IP; whether it is per account or per IP is not known yet). The client waits and retries when it hits that.
+- **Rate limits:** when Vast answers 429 (too many requests), the client waits and retries.
 
-Tested under Node, and deployed to a real Cloudflare account (`examples/cloudflare-worker`), where the live safety check passed against real Vast GPUs. Not yet tried on Vercel. The example uses `MemoryStore`, which a real deployment should replace with Durable Objects or KV.
+A Cloudflare Worker example is in `examples/cloudflare-worker`. It uses `MemoryStore`; a production deployment should use Durable Objects or KV.
 
 ## Development
 

@@ -9,7 +9,7 @@ import { buildOnstart } from "../src/guard.js";
 // on PATH. `readings` is what nvidia-smi prints each minute (one line per GPU).
 // Returns the minute at which it destroyed the box, or undefined if it never did.
 function runIdleWatcher(idleMinutes: number, readings: string[]): number | undefined {
-  const onstart = buildOnstart({ hours: 1, destroyOnExit: false, apiUrl: "u", idleMinutes });
+  const onstart = buildOnstart({ expiresAt: 1, destroyOnExit: false, apiUrl: "u", idleMinutes });
   const script = /cat > \/tmp\/vast-mcp-idle\.sh <<'VASTMCPIDLE'\n([\s\S]*?)\nVASTMCPIDLE/.exec(onstart)![1];
   const dir = mkdtempSync(join(tmpdir(), "vast-mcp-idle-"));
   const bin = join(dir, "bin");
@@ -48,6 +48,6 @@ describe("idle auto-destroy script", () => {
   });
 
   it("is off when idle minutes is 0", () => {
-    expect(buildOnstart({ hours: 1, destroyOnExit: false, apiUrl: "u", idleMinutes: 0 })).not.toContain("vast-mcp-idle");
+    expect(buildOnstart({ expiresAt: 1, destroyOnExit: false, apiUrl: "u", idleMinutes: 0 })).not.toContain("vast-mcp-idle");
   });
 });

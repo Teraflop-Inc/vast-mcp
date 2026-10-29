@@ -140,22 +140,28 @@ describe("Guard", () => {
 
 describe("buildOnstart", () => {
   it("always arms the self-destroy timer", () => {
-    const s = buildOnstart({ hours: 0.5, destroyOnExit: false, apiUrl: "https://console.vast.ai" });
-    expect(s).toContain("sleep 1800");
+    const s = buildOnstart({ expiresAt: 1_900_000_000, destroyOnExit: false, apiUrl: "https://console.vast.ai" });
+    // Counts down to a fixed time, so a restart can't extend it.
+    expect(s).toContain("left=$((1900000000 - $(date +%s)))");
     expect(s).toContain("CONTAINER_API_KEY");
     expect(s).not.toContain("vast-mcp-job.sh");
   });
   it("destroys after the command only when asked", () => {
-    const keep = buildOnstart({ hours: 1, command: "nvidia-smi", destroyOnExit: false, apiUrl: "u" });
-    const kill = buildOnstart({ hours: 1, command: "nvidia-smi", destroyOnExit: true, apiUrl: "u" });
+    const keep = buildOnstart({ expiresAt: 1, command: "nvidia-smi", destroyOnExit: false, apiUrl: "u" });
+    const kill = buildOnstart({ expiresAt: 1, command: "nvidia-smi", destroyOnExit: true, apiUrl: "u" });
     expect(keep).toContain("nvidia-smi");
     expect(keep).not.toContain("job finished, destroying");
     expect(kill).toContain("job finished, destroying");
+  });
+  it("keeps the whole command inside the job file, even a line that looks like the delimiter", () => {
+    const s = buildOnstart({ expiresAt: 1, command: "echo a\nVASTMCPJOB\necho b", destroyOnExit: false, apiUrl: "u" });
+    const eof = /<<'(VASTMCPJOB_[0-9a-f]+)'/.exec(s)![1];
+    expect(s.split("\n").filter((l) => l === eof)).toHaveLength(1);
   });
 });
 
 describe("buildOnstart warnings", () => {
   it("warns in the instance log when the timer has no way to call the API", () => {
-    expect(buildOnstart({ hours: 1, destroyOnExit: false, apiUrl: "u" })).toContain("neither curl nor python3");
+    expect(buildOnstart({ expiresAt: 1, destroyOnExit: false, apiUrl: "u" })).toContain("neither curl nor python3");
   });
 });

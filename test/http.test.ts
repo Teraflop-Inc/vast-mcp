@@ -7,7 +7,7 @@ import { MemoryStore } from "../src/store.js";
 
 const OFFER = { id: 1, gpu_name: "RTX 4090", num_gpus: 1, gpu_ram: 24000, dph_total: 0.3 };
 
-function setup() {
+function setup(limits: Partial<typeof DEFAULT_LIMITS> = {}) {
   const vastCalls: { method: string; path: string; auth: string | null }[] = [];
   const auditLines: string[] = [];
   const fakeVast = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -18,13 +18,17 @@ function setup() {
     if (url.pathname === "/api/v0/users/current/") return body({ credit: 12.5 });
     if (url.pathname === "/api/v1/instances/") return body({ instances: [] });
     if (url.pathname === "/api/v0/bundles/") return body({ offers: [OFFER] });
-    if (url.pathname === "/api/v0/asks/1/") return body({ success: true, new_contract: 99 });
+    if (url.pathname === "/api/v0/asks/1/") {
+      // Renting takes a moment, which is when parallel rentals used to slip past the caps.
+      await new Promise((r) => setTimeout(r, 20));
+      return body({ success: true, new_contract: 99 });
+    }
     return new Response("not found", { status: 404 });
   };
   const handler = createHttpHandler({
     store: new MemoryStore(),
     apiUrl: "https://vast.test",
-    limits: { ...DEFAULT_LIMITS, maxPricePerHour: 0.5 },
+    limits: { ...DEFAULT_LIMITS, maxPricePerHour: 0.5, ...limits },
     audit: (line) => auditLines.push(line),
     fetch: fakeVast,
   });
@@ -63,6 +67,19 @@ describe("hosted HTTP mode", () => {
     expect(status.data.credit_usd).toBe(12.5);
     expect(status.data.limits.max_price_per_hour).toBe(0.5);
     expect(vastCalls.every((c) => c.auth === "Bearer key-alice")).toBe(true);
+  });
+
+  it("runs one user's parallel rentals one at a time, so both can't pass the spend cap", async () => {
+    const { connect } = setup({ maxSessionSpend: 0.5 });
+    const alice = await connect("key-alice");
+    const q1 = await alice.call("quote_rental", { offer_id: 1, hours: 1, name: "a" });
+    const q2 = await alice.call("quote_rental", { offer_id: 1, hours: 1, name: "b" });
+    const results = await Promise.all([
+      alice.call("rent_gpu", { quote_id: q1.data.quote_id }),
+      alice.call("rent_gpu", { quote_id: q2.data.quote_id }),
+    ]);
+    expect(results.filter((r) => !r.isError)).toHaveLength(1);
+    expect(results.find((r) => r.isError)?.text).toMatch(/session spend/);
   });
 
   it("keeps quotes per user and never logs the key", async () => {
