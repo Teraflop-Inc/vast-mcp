@@ -78,7 +78,7 @@ The same server also runs over HTTP for many users at once. Each request carries
 node dist/index.js --http --port 8787     # serves http://127.0.0.1:8787/mcp
 ```
 
-Clients send `Authorization: Bearer <vast key>`. Users can lower the limits for themselves with headers named after the variables above (`x-vast-mcp-max-price-per-hour: 0.5`, `x-vast-mcp-read-only: 1`). The server's own environment variables are the ceiling, so a header can lower a limit but never raise it. In hosted mode, session spend means the last 24 hours, per user. The audit log goes to stdout, tagged with a hash of the credential, never the credential itself.
+Clients send `Authorization: Bearer <vast key>`. The limits come from the server's environment variables above and apply to every user. In hosted mode, session spend means the last 24 hours, per user. The audit log goes to stdout, tagged with a hash of the credential, never the credential itself.
 
 To run it on another platform, import the request handler. It uses only web-standard APIs and no file system:
 
@@ -88,7 +88,7 @@ import { createHttpHandler, MemoryStore, parseLimits, DEFAULT_API_URL } from "va
 const handler = createHttpHandler({
   store: new MemoryStore(),       // replace with shared storage when running more than one instance
   apiUrl: DEFAULT_API_URL,
-  ceiling: parseLimits((name) => process.env[name]),
+  limits: parseLimits((name) => process.env[name]),
   audit: (line) => console.log(line),
 });
 // handler: (Request) => Promise<Response>

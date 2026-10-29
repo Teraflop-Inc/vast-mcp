@@ -34,14 +34,17 @@ async function burst(key, n) {
   return statuses.filter((s) => s === 429).length;
 }
 
-const server = spawn("node", ["dist/index.js", "--http", "--port", PORT], { stdio: ["ignore", "ignore", "inherit"] });
+const server = spawn("node", ["dist/index.js", "--http", "--port", PORT], {
+  stdio: ["ignore", "ignore", "inherit"],
+  env: { ...process.env, VAST_MCP_MAX_PRICE_PER_HOUR: "0.2" },
+});
 await sleep(1500);
 
 async function connect(key) {
   const client = new Client({ name: "two-users", version: "0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
-      requestInit: { headers: { authorization: `Bearer ${key}`, "x-vast-mcp-max-price-per-hour": "0.2" } },
+      requestInit: { headers: { authorization: `Bearer ${key}` } },
     }),
   );
   const call = async (name, args = {}) => {

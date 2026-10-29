@@ -15,7 +15,7 @@ export default {
     handler ??= createHttpHandler({
       store: new MemoryStore(),
       apiUrl: env.VAST_API_URL ?? DEFAULT_API_URL,
-      ceiling: parseLimits((name) => env[name]),
+      limits: parseLimits((name) => env[name]),
       audit: (line) => console.log(line),
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
     });

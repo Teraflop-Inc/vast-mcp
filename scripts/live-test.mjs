@@ -21,11 +21,13 @@ let httpServer;
 let transport;
 if (useHttp) {
   const port = "8799";
-  httpServer = spawn("node", ["dist/index.js", "--http", "--port", port], { stdio: ["ignore", "inherit", "inherit"] });
+  httpServer = spawn("node", ["dist/index.js", "--http", "--port", port], {
+    stdio: ["ignore", "inherit", "inherit"],
+    env: { ...process.env, VAST_MCP_MAX_PRICE_PER_HOUR: maxPrice },
+  });
   await sleep(1500);
-  // The cap goes in a header here: a hosted user sets limits in their client config.
   transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-    requestInit: { headers: { authorization: `Bearer ${findApiKey(process.env)}`, "x-vast-mcp-max-price-per-hour": maxPrice } },
+    requestInit: { headers: { authorization: `Bearer ${findApiKey(process.env)}` } },
   });
 } else {
   transport = new StdioClientTransport({

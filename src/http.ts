@@ -2,7 +2,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { jsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/types.js";
 import { jsonAuditLog } from "./audit.js";
 import { Guard } from "./guard.js";
-import { clampLimits, headerName, type Limits, parseLimits } from "./limits.js";
+import type { Limits } from "./limits.js";
 import { createServer } from "./server.js";
 import type { Store } from "./store.js";
 import { type Fetch, VastClient } from "./vast.js";
@@ -15,8 +15,8 @@ import { type Fetch, VastClient } from "./vast.js";
 export interface HttpHandlerOptions {
   store: Store;
   apiUrl: string;
-  // The operator's limits. Users can lower them with x-vast-mcp-* headers, never raise them.
-  ceiling: Limits;
+  // The operator's limits, applied to every user.
+  limits: Limits;
   // Receives one JSON line per action, tagged with the user's hashed id. Never the credential.
   audit: (line: string) => void;
   path?: string;
@@ -55,16 +55,9 @@ export function createHttpHandler(opts: HttpHandlerOptions): (req: Request) => P
       );
     }
 
-    let limits: Limits;
-    try {
-      limits = clampLimits(parseLimits((name) => req.headers.get(headerName(name)) ?? undefined, opts.ceiling), opts.ceiling);
-    } catch (err) {
-      return json(400, { error: err instanceof Error ? err.message : String(err) });
-    }
-
     const owner = await ownerId(credential);
     const client = new VastClient(credential, fetchImpl, opts.apiUrl);
-    const guard = new Guard(limits, client, { store: opts.store, owner, spendWindowMs: SPEND_WINDOW_MS, now: opts.now });
+    const guard = new Guard(opts.limits, client, { store: opts.store, owner, spendWindowMs: SPEND_WINDOW_MS, now: opts.now });
     const audit = jsonAuditLog(opts.audit, { owner });
     const server = createServer({ client, guard, audit, apiUrl: opts.apiUrl, now: opts.now, jsonSchemaValidator: opts.jsonSchemaValidator });
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

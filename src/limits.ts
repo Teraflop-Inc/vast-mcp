@@ -25,17 +25,11 @@ const NAMES: Record<Exclude<keyof Limits, "readOnly">, string> = {
 };
 const READ_ONLY = "VAST_MCP_READ_ONLY";
 
-// The HTTP header for a setting is its env name, lowercased, dashed, with an
-// "x-" prefix: VAST_MCP_MAX_HOURS -> x-vast-mcp-max-hours.
-export function headerName(envName: string): string {
-  return "x-" + envName.toLowerCase().replace(/_/g, "-");
-}
-
 function truthy(raw: string | undefined): boolean {
   return ["1", "true", "yes"].includes((raw ?? "").toLowerCase());
 }
 
-// Reads limits by setting name (env var or header lookup), falling back to `base`.
+// Reads limits by env var name, falling back to `base`.
 export function parseLimits(get: (envName: string) => string | undefined, base: Limits = DEFAULT_LIMITS): Limits {
   const out: Limits = { ...base, readOnly: base.readOnly || truthy(get(READ_ONLY)) };
   for (const [key, name] of Object.entries(NAMES) as [keyof typeof NAMES, string][]) {
@@ -46,16 +40,4 @@ export function parseLimits(get: (envName: string) => string | undefined, base: 
     out[key] = n;
   }
   return out;
-}
-
-// A hosted server's own limits are the ceiling: a user can lower them, never raise them.
-export function clampLimits(requested: Limits, ceiling: Limits): Limits {
-  return {
-    maxPricePerHour: Math.min(requested.maxPricePerHour, ceiling.maxPricePerHour),
-    maxTotalPerHour: Math.min(requested.maxTotalPerHour, ceiling.maxTotalPerHour),
-    maxInstances: Math.min(requested.maxInstances, ceiling.maxInstances),
-    maxHours: Math.min(requested.maxHours, ceiling.maxHours),
-    maxSessionSpend: Math.min(requested.maxSessionSpend, ceiling.maxSessionSpend),
-    readOnly: requested.readOnly || ceiling.readOnly,
-  };
 }

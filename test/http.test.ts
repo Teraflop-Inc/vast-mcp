@@ -24,14 +24,14 @@ function setup() {
   const handler = createHttpHandler({
     store: new MemoryStore(),
     apiUrl: "https://vast.test",
-    ceiling: DEFAULT_LIMITS,
+    limits: { ...DEFAULT_LIMITS, maxPricePerHour: 0.5 },
     audit: (line) => auditLines.push(line),
     fetch: fakeVast,
   });
 
-  async function connect(key: string, headers: Record<string, string> = {}) {
+  async function connect(key: string) {
     const transport = new StreamableHTTPClientTransport(new URL("http://mcp.test/mcp"), {
-      requestInit: { headers: { authorization: `Bearer ${key}`, ...headers } },
+      requestInit: { headers: { authorization: `Bearer ${key}` } },
       fetch: (input, init) => handler(new Request(input, init)),
     });
     const client = new Client({ name: "test", version: "0" });
@@ -56,13 +56,12 @@ describe("hosted HTTP mode", () => {
     expect((await handler(new Request("http://mcp.test/health"))).status).toBe(200);
   });
 
-  it("calls Vast with each user's own key and applies their header limits under the ceiling", async () => {
+  it("calls Vast with each user's own key and applies the server's limits", async () => {
     const { connect, vastCalls } = setup();
-    const { call } = await connect("key-alice", { "x-vast-mcp-max-price-per-hour": "0.5", "x-vast-mcp-max-hours": "50" });
+    const { call } = await connect("key-alice");
     const status = await call("account_status");
     expect(status.data.credit_usd).toBe(12.5);
     expect(status.data.limits.max_price_per_hour).toBe(0.5);
-    expect(status.data.limits.max_hours).toBe(DEFAULT_LIMITS.maxHours);
     expect(vastCalls.every((c) => c.auth === "Bearer key-alice")).toBe(true);
   });
 
@@ -83,17 +82,5 @@ describe("hosted HTTP mode", () => {
 
     expect(auditLines.some((l) => JSON.parse(l).event === "rent")).toBe(true);
     expect(auditLines.join("\n")).not.toMatch(/key-alice|key-bob/);
-  });
-
-  it("rejects a bad limit header", async () => {
-    const { handler } = setup();
-    const res = await handler(
-      new Request("http://mcp.test/mcp", {
-        method: "POST",
-        headers: { authorization: "Bearer k", "x-vast-mcp-max-hours": "lots" },
-        body: "{}",
-      }),
-    );
-    expect(res.status).toBe(400);
   });
 });

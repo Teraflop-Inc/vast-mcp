@@ -19,23 +19,26 @@ const mode = useHttp ? "hosted" : "local";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const owned = new Set();
-const PORT = "8798";
 const IMAGE = "python:3.12-slim";
 
 const remoteUrl = process.env.VAST_MCP_URL;
-let httpServer;
-if (useHttp && !remoteUrl) {
-  httpServer = spawn("node", ["dist/index.js", "--http", "--port", PORT], { stdio: ["ignore", "ignore", "inherit"] });
-  await sleep(1500);
-}
+const httpServers = [];
+let port = 8798;
 
-// Limits go in env vars locally and in headers when hosted, the way each kind of user sets them.
+// Limits are server settings, so hosted mode starts a local server for each set of limits.
 async function connect(limits = {}) {
   let transport;
   if (useHttp) {
+    let url = remoteUrl;
+    if (!url) {
+      port++;
+      const env = { ...process.env, ...limits };
+      httpServers.push(spawn("node", ["dist/index.js", "--http", "--port", String(port)], { stdio: ["ignore", "ignore", "inherit"], env }));
+      await sleep(1500);
+      url = `http://127.0.0.1:${port}/mcp`;
+    }
     const headers = { authorization: `Bearer ${findApiKey(process.env)}` };
-    for (const [k, v] of Object.entries(limits)) headers["x-" + k.toLowerCase().replace(/_/g, "-")] = v;
-    transport = new StreamableHTTPClientTransport(new URL(remoteUrl ?? `http://127.0.0.1:${PORT}/mcp`), { requestInit: { headers } });
+    transport = new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers } });
   } else {
     transport = new StdioClientTransport({ command: "node", args: ["dist/index.js"], env: { ...process.env, ...limits } });
   }
@@ -96,19 +99,21 @@ async function waitGone(id, maxMinutes) {
 
 const mcp = await connect({ VAST_MCP_MAX_PRICE_PER_HOUR: "0.2" });
 try {
-  // Read-only
-  const ro = await connect({ VAST_MCP_READ_ONLY: "1" });
-  const offers = (await ro.call("search_gpus", { limit: 1 })).data.offers;
-  const roQuote = await ro.call("quote_rental", { offer_id: offers[0].offer_id, hours: 0.1, name: "ro" });
-  check("read-only allows search, blocks quote", offers.length === 1 && roQuote.isError && /Read-only/.test(roQuote.text));
-  await ro.client.close();
+  // Read-only and the price cap need their own server settings, so a deployed server skips them.
+  if (!remoteUrl) {
+    const ro = await connect({ VAST_MCP_READ_ONLY: "1" });
+    const offers = (await ro.call("search_gpus", { limit: 1 })).data.offers;
+    const roQuote = await ro.call("quote_rental", { offer_id: offers[0].offer_id, hours: 0.1, name: "ro" });
+    check("read-only allows search, blocks quote", offers.length === 1 && roQuote.isError && /Read-only/.test(roQuote.text));
+    await ro.client.close();
 
-  // Price cap against a real offer that costs more than the cap
-  const capped = await connect({ VAST_MCP_MAX_PRICE_PER_HOUR: "0.01" });
-  const pricey = (await capped.call("search_gpus", { limit: 1 })).data.offers[0];
-  const capQuote = await capped.call("quote_rental", { offer_id: pricey.offer_id, hours: 0.1, name: "cap" });
-  check("price cap blocks a real offer", capQuote.isError && /per-GPU limit/.test(capQuote.text), `offer at $${pricey.price_per_hour}/hr`);
-  await capped.client.close();
+    // Price cap against a real offer that costs more than the cap
+    const capped = await connect({ VAST_MCP_MAX_PRICE_PER_HOUR: "0.01" });
+    const pricey = (await capped.call("search_gpus", { limit: 1 })).data.offers[0];
+    const capQuote = await capped.call("quote_rental", { offer_id: pricey.offer_id, hours: 0.1, name: "cap" });
+    check("price cap blocks a real offer", capQuote.isError && /per-GPU limit/.test(capQuote.text), `offer at $${pricey.price_per_hour}/hr`);
+    await capped.client.close();
+  }
 
   // Box A: rent, logs, stop/start, foreign-label refusal, destroy
   const a = await rent(mcp, { hours: 0.5, command: "echo MATRIX_HELLO" });
@@ -166,7 +171,7 @@ try {
     }
   }
   await mcp.client.close();
-  httpServer?.kill();
+  for (const s of httpServers) s.kill();
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\n[${mode}] ${results.length - failed}/${results.length} passed`);
   process.exitCode = failed ? 1 : 0;

@@ -29,7 +29,7 @@ function http(port: number, host: string) {
   const handler = createHttpHandler({
     store: new MemoryStore(),
     apiUrl: process.env.VAST_API_URL ?? DEFAULT_API_URL,
-    ceiling: parseLimits((name) => process.env[name]),
+    limits: parseLimits((name) => process.env[name]),
     audit: (line) => console.log(line),
   });
   const server = createNodeServer(async (req, res) => {
