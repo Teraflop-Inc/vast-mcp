@@ -7,12 +7,14 @@ export interface Limits {
   readOnly: boolean;
 }
 
+// No caps unless the operator sets them: the user approves every price before
+// renting, and the time limit and idle check stop forgotten boxes.
 export const DEFAULT_LIMITS: Limits = {
-  maxPricePerHour: 1.0,
-  maxTotalPerHour: 3.0,
-  maxInstances: 2,
-  maxHours: 2,
-  maxSessionSpend: 10,
+  maxPricePerHour: Infinity,
+  maxTotalPerHour: Infinity,
+  maxInstances: Infinity,
+  maxHours: Infinity,
+  maxSessionSpend: Infinity,
   readOnly: false,
 };
 

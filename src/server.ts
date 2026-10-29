@@ -6,6 +6,8 @@ import { buildOnstart, Guard, isActive, makeLabel, parseLabel, PolicyError } fro
 import { type Instance, type Offer, VastApiError, type VastClient } from "./vast.js";
 
 const DEFAULT_IMAGE = "vastai/pytorch:latest";
+// Unset caps are Infinity, which JSON would turn into null.
+const cap = (n: number): number | "none" => (Number.isFinite(n) ? n : "none");
 // get_instance stops waiting at these; anything else (null, loading, created) is still starting.
 const SETTLED = new Set(["running", "exited", "stopped", "offline", "unknown"]);
 const POLL_MS = 10_000;
@@ -103,6 +105,10 @@ export function createServer(deps: ServerDeps): McpServer {
         min_gpu_ram_gb: z.number().min(1).optional().describe("Minimum memory per GPU in GB"),
         max_price_per_hour: z.number().positive().optional().describe("Maximum total price in $/hour"),
         min_reliability: z.number().min(0).max(1).default(0.98),
+        verified_only: z
+          .boolean()
+          .default(true)
+          .describe("Only hosts Vast has verified. Set false to include unverified hosts, which are often cheaper but less proven."),
         disk_gb: z.number().min(10).max(2000).default(32).describe("Disk to allocate; it is part of the price"),
         min_download_mbps: z
           .number()
@@ -116,7 +122,7 @@ export function createServer(deps: ServerDeps): McpServer {
     async (args) =>
       run(async () => {
         const q: Record<string, unknown> = {
-          verified: { eq: true },
+          ...(args.verified_only ? { verified: { eq: true } } : {}),
           external: { eq: false },
           rentable: { eq: true },
           rented: { eq: false },
@@ -135,7 +141,7 @@ export function createServer(deps: ServerDeps): McpServer {
         return {
           offers: offers.map(summarizeOffer),
           note: offers.length ? undefined : "No offers matched. Loosen the filters or check the GPU name.",
-          your_limits: { max_price_per_hour: guard.limits.maxPricePerHour, max_hours: guard.limits.maxHours },
+          your_limits: { max_price_per_hour: cap(guard.limits.maxPricePerHour), max_hours: cap(guard.limits.maxHours) },
         };
       })(),
   );
@@ -387,11 +393,11 @@ export function createServer(deps: ServerDeps): McpServer {
           session_spend_committed_usd: Number((await guard.committedSpend()).toFixed(2)),
           limits: {
             read_only: l.readOnly,
-            max_price_per_hour: l.maxPricePerHour,
-            max_total_per_hour: l.maxTotalPerHour,
-            max_instances: l.maxInstances,
-            max_hours: l.maxHours,
-            max_session_spend: l.maxSessionSpend,
+            max_price_per_hour: cap(l.maxPricePerHour),
+            max_total_per_hour: cap(l.maxTotalPerHour),
+            max_instances: cap(l.maxInstances),
+            max_hours: cap(l.maxHours),
+            max_session_spend: cap(l.maxSessionSpend),
           },
         };
       })(),

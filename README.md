@@ -39,7 +39,7 @@ If you already ran `vastai set api-key`, you can leave out `VAST_API_KEY`.
 
 | Tool | What it does | Spends money |
 |------|--------------|--------------|
-| `search_gpus` | Find offers by GPU, memory, price, reliability. Cheapest first. | No |
+| `search_gpus` | Find offers by GPU, memory, price, reliability. Cheapest first, verified hosts only unless asked. | No |
 | `quote_rental` | Check an offer is still there and fits your limits. Returns the price and the most it can cost. | No |
 | `rent_gpu` | Rent from an approved quote. | **Yes** |
 | `list_instances` / `get_instance` | Status, price, SSH command, time left. | No |
@@ -50,19 +50,19 @@ If you already ran `vastai set api-key`, you can leave out `VAST_API_KEY`.
 
 ## Safety limits
 
-Vast API keys have no spend limits, so this server enforces them:
+The server enforces these itself:
 
 - **Price check before every rental.** Renting is two steps: `quote_rental` shows the cost, and `rent_gpu` only works with a quote. The quote expires after 10 minutes and fails if the price rises more than 5%.
 - **Every rental has a time limit and destroys itself.** A timer runs on the GPU box itself, so it still fires if you close your assistant, and stopping and restarting the box doesn't extend it. By default the box also destroys itself after 30 minutes with the GPU idle (`idle_minutes` on `quote_rental`). The timers need `curl` or `python3` on the image, and the idle check needs `nvidia-smi`; if they're missing, the box says so in its log. As a backup, the server destroys any of its boxes that are more than 10 minutes past their limit the next time it's used.
-- **Spend caps**, all set by environment variable:
+- **Optional spend caps**, off unless you set them by environment variable:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `VAST_MCP_MAX_PRICE_PER_HOUR` | `1.0` | Most one rental can cost per hour (USD) |
-| `VAST_MCP_MAX_TOTAL_PER_HOUR` | `3.0` | Most all running rentals can cost per hour together |
-| `VAST_MCP_MAX_INSTANCES` | `2` | Most rentals running at once |
-| `VAST_MCP_MAX_HOURS` | `2` | Longest time limit allowed |
-| `VAST_MCP_MAX_SESSION_SPEND` | `10` | Most one session can commit (price x time limit, summed) |
+| `VAST_MCP_MAX_PRICE_PER_HOUR` | none | Most one rental can cost per hour (USD) |
+| `VAST_MCP_MAX_TOTAL_PER_HOUR` | none | Most all running rentals can cost per hour together |
+| `VAST_MCP_MAX_INSTANCES` | none | Most rentals running at once |
+| `VAST_MCP_MAX_HOURS` | none | Longest time limit allowed |
+| `VAST_MCP_MAX_SESSION_SPEND` | none | Most one session can commit (price x time limit, summed) |
 | `VAST_MCP_READ_ONLY` | off | Set to `1` to allow only searching and reading |
 
 - **Only touches its own instances.** Stop, start and destroy work only on instances this server created (label starts with `vast-mcp:`). Your other instances are safe.
